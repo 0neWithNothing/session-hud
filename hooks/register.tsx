@@ -240,6 +240,30 @@ const refreshBranch = async ($: EngineInterface) => {
 // Agents seen running at the last poll: background ones outlive the main turn.
 let runningAgents = 0
 
+// The model the main loop last sent a request with, by id (`claude-opus-5-5`).
+let modelId: string | null = null
+// The effort the settings last held for that model: `/effort` writes it at once,
+// before any request carries it.
+let settingsEffort: string | null = null
+
+const refreshEffort = async ($: EngineInterface) => {
+  try {
+    const settings = (await $.settings.read()) as {
+      effortLevel?: unknown
+      modelSettings?: Record<string, { effortLevel?: unknown }>
+    }
+    const perModel = settings.modelSettings ?? {}
+    const entry = modelId ? perModel[modelId] : Object.values(perModel).length === 1 ? Object.values(perModel)[0] : undefined
+    const level = entry?.effortLevel ?? settings.effortLevel
+    const effort = typeof level === 'string' ? level : null
+    if (effort === null || effort === settingsEffort) return
+    settingsEffort = effort
+    await update($, infoAtom, info => (info.effort === effort ? info : { ...info, effort }))
+  } catch {
+    // Settings unreadable: the next request's effort still shows.
+  }
+}
+
 const refreshAgents = async ($: EngineInterface) => {
   try {
     const running: HudAgent[] = (await $.agent.list())
@@ -258,6 +282,7 @@ export const register: Register = on => {
   let isWorking = false
   let lastTick = 0
   let lastAgentPoll = 0
+  let lastEffortPoll = 0
 
   on('session.start', async ($, e, next) => {
     const result = await next(e)
@@ -275,6 +300,10 @@ export const register: Register = on => {
       // Drawing is pure: the timer keeps the mode in state for the next reload.
       const label = modeLabel
       if (label !== null) void update($, modeAtom, m => (m === label ? m : label))
+      if (now - lastEffortPoll >= 2000) {
+        lastEffortPoll = now
+        void refreshEffort($)
+      }
       if ((isWorking || runningAgents > 0) && now - lastAgentPoll >= 2000) {
         lastAgentPoll = now
         void refreshAgents($)
@@ -374,6 +403,7 @@ export const register: Register = on => {
 
   on('turn.step', async function* ($, e, next) {
     if (!(e as { agentId?: string }).agentId) {
+      modelId = e.model.replace(/\[1m\]$/i, '')
       const effort = e.effort === undefined ? null : String(e.effort)
       await update($, infoAtom, info => (info.effort === effort ? info : { ...info, effort }))
     }
