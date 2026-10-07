@@ -13,10 +13,20 @@
 
 ## Установка
 
-В терминальной сессии Claude Code:
+Нужны свежий Claude Code (`claude update`) и установленный git.
+
+Внутри сессии Claude Code:
 
 ```
-/plugin install session-hud --marketplace 0neWithNothing/session-hud
+/plugin marketplace add 0neWithNothing/session-hud
+/plugin install session-hud@session-hud
 ```
 
-Ответь `y` на вопрос о добавлении маркетплейса, затем выбери scope (user — для всех сессий).
+Или из обычного терминала:
+
+```
+claude plugin marketplace add 0neWithNothing/session-hud
+claude plugin install session-hud@session-hud
+```
+
+Панель появится в новой сессии. Работает в терминале и в десктоп-приложении Claude (не в расширении VS Code).
