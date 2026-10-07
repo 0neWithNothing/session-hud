@@ -61,3 +61,28 @@ test('an Edit adds its changed lines to the edits counter', async ($, on) => {
   expect(await ui.find({ text: /1 файл/ })).toBeDefined()
   await ui.unmount()
 })
+
+test('a context past 90% shows ticks and a warning on the bar', async ($, on) => {
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.measure({
+    context: { tokens: 184_000, window: 200_000, percent: 92 },
+    rateLimits: [],
+    changed: ['context'],
+  })
+  const ui = await $.ui.mount({ plugin: 'session-hud', surface: 'terminal', ...IDLE })
+  expect(await ui.find({ text: /╋/ })).toBeDefined()
+  expect(await ui.find({ text: /контекст почти полон/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a large context warns by tokens even in a big window', async ($, on) => {
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.measure({
+    context: { tokens: 260_000, window: 1_000_000, percent: 26 },
+    rateLimits: [],
+    changed: ['context'],
+  })
+  const ui = await $.ui.mount({ plugin: 'session-hud', surface: 'terminal', ...IDLE })
+  expect(await ui.find({ text: /контекст большой/ })).toBeDefined()
+  await ui.unmount()
+})

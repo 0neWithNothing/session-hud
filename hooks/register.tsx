@@ -171,6 +171,36 @@ const gradient = (t: number) => {
   return `#${mix.map(c => c.toString(16).padStart(2, '0')).join('')}`
 }
 
+// Context thresholds: ticks on the bar and a toast on each crossing. Percent
+// of the window tracks auto-compact; raw tokens track answer quality, which
+// drops with size whatever the window is.
+const CTX_THRESHOLDS = [50, 75, 90]
+const TOKEN_THRESHOLDS = [150_000, 250_000]
+
+// 0 fine, 1 getting large, 2 compact now.
+const ctxLevel = (percent: number, tokens: number | null) =>
+  percent >= 90 || (tokens ?? 0) >= 250_000 ? 2 : percent >= 75 || (tokens ?? 0) >= 150_000 ? 1 : 0
+
+const ctxWarningText = (percent: number, tokens: number | null) =>
+  percent >= 90
+    ? ' ⚠ контекст почти полон — /compact'
+    : (tokens ?? 0) >= 250_000
+      ? ' ⚠ контекст большой — /compact'
+      : percent >= 75
+        ? ' ▲ пора /compact'
+        : (tokens ?? 0) >= 150_000
+          ? ' ▲ контекст растёт'
+          : ''
+
+const ctxColor = (percent: number, tokens: number | null) =>
+  (['success', 'warning', 'error'] as const)[ctxLevel(percent, tokens)]
+
+// Percent ticks, plus the token thresholds that fit in this window.
+const ctxTicks = (window: number | undefined) => [
+  ...CTX_THRESHOLDS,
+  ...(window ? TOKEN_THRESHOLDS.filter(t => t < window).map(t => (t / window) * 100) : []),
+]
+
 const levelColor = (percent: number) => (percent >= 85 ? 'error' : percent >= 60 ? 'warning' : 'success')
 
 const countLines = (text: string) => (text === '' ? 0 : text.split('\n').length)
@@ -371,11 +401,39 @@ export const register: Register = on => {
     })
 
     const readings: { key: string; label: string; percent: number | undefined }[] = [
-      { key: 'context', label: 'Контекст', percent: e.context.percent },
       ...e.rateLimits.map(l => ({ key: `limit:${l.kind}`, label: LIMIT_LABELS[l.kind] ?? l.kind, percent: l.percentUsed })),
     ]
     const warned = await read($, warnedAtom)
     const nextWarned = new Set(warned)
+    const ctx = e.context.percent
+    if (ctx !== undefined) {
+      for (const t of CTX_THRESHOLDS) {
+        const key = `context:${t}`
+        if (ctx >= t && !nextWarned.has(key)) {
+          nextWarned.add(key)
+          // One toast per reading: the highest threshold crossed speaks.
+          if (!CTX_THRESHOLDS.some(u => u > t && ctx >= u)) {
+            $.ui.toast(`${t >= 90 ? '⚠' : '▲'} Контекст: ${Math.round(ctx)}% (порог ${t}%)`)
+          }
+        } else if (ctx < t - 5) {
+          nextWarned.delete(key)
+        }
+      }
+    }
+    const tokens = e.context.tokens
+    if (tokens != null) {
+      for (const t of TOKEN_THRESHOLDS) {
+        const key = `tokens:${t}`
+        if (tokens >= t && !nextWarned.has(key)) {
+          nextWarned.add(key)
+          if (!TOKEN_THRESHOLDS.some(u => u > t && tokens >= u)) {
+            $.ui.toast(`${t >= 250_000 ? '⚠' : '▲'} Контекст: ${formatTokens(tokens)} токенов (порог ${formatTokens(t)})`)
+          }
+        } else if (tokens < t * 0.9) {
+          nextWarned.delete(key)
+        }
+      }
+    }
     for (const r of readings) {
       if (r.percent === undefined) continue
       if (r.percent >= 90 && !nextWarned.has(r.key)) {
@@ -491,23 +549,30 @@ export const register: Register = on => {
     const isWide = inner >= 100
     const leftWidth = isWide ? inner - SIDE_WIDTH - 2 : inner
 
-    const bar = (key: string, percent: number | null, barWidth: number) => {
+    const bar = (key: string, percent: number | null, barWidth: number, ticks: number[] = []) => {
       const p = Math.min(100, Math.max(0, percent ?? 0))
       const filled = Math.round((p / 100) * barWidth)
+      const tickCells = new Set(ticks.map(t => Math.min(barWidth - 1, Math.round((t / 100) * barWidth))))
       const cells = []
-      for (let i = 0; i < filled; i++) {
+      for (let i = 0; i < barWidth; i++) {
+        const isTick = tickCells.has(i)
         cells.push(
-          <Text key={`${key}-${i}`} color={gradient(i / Math.max(1, barWidth - 1))}>
-            ━
-          </Text>,
+          i < filled ? (
+            <Text key={`${key}-${i}`} color={gradient(i / Math.max(1, barWidth - 1))}>
+              {isTick ? '╋' : '━'}
+            </Text>
+          ) : isTick ? (
+            <Text key={`${key}-${i}`} color="subtle">
+              ┼
+            </Text>
+          ) : (
+            <Text key={`${key}-${i}`} dimColor>
+              ─
+            </Text>
+          ),
         )
       }
-      return (
-        <Text>
-          {cells}
-          <Text dimColor>{'─'.repeat(barWidth - filled)}</Text>
-        </Text>
-      )
+      return <Text>{cells}</Text>
     }
 
     const spinner = SPINNER[Math.floor(now / 1000) % SPINNER.length]
@@ -535,6 +600,7 @@ export const register: Register = on => {
     const sep = <Text color={ORANGE} dimColor>{' │ '}</Text>
     const label = (text: string) => <Text color={ORANGE}>{text.padEnd(LABEL_WIDTH)}</Text>
     const ctxPercent = usage?.percent ?? null
+    const ctxTok = usage?.tokens ?? null
     const limits = usage?.limits ?? []
 
     const frame = (...children: RenderNode[]) => (
@@ -562,10 +628,13 @@ export const register: Register = on => {
           {effortText}
           {sep}
           <Text color="subtle">контекст </Text>
-          {bar('ctx', ctxPercent, 12)}
-          <Text bold color={ctxPercent === null ? 'subtle' : levelColor(ctxPercent)}>
+          {bar('ctx', ctxPercent, 12, ctxTicks(usage?.window))}
+          <Text bold color={ctxPercent === null ? 'subtle' : ctxColor(ctxPercent, ctxTok)}>
             {ctxPercent === null ? ' —' : ` ${ctxPercent}%`}
           </Text>
+          {ctxPercent !== null && ctxLevel(ctxPercent, ctxTok) > 0 && (
+            <Text color={ctxColor(ctxPercent, ctxTok)}>{ctxLevel(ctxPercent, ctxTok) === 2 ? ' ⚠' : ' ▲'}</Text>
+          )}
           {limits.map(limit => (
             <Text key={`c-${limit.kind}`}>
               {sep}
@@ -635,7 +704,7 @@ export const register: Register = on => {
     // after the bars is measured, so the side column can sit right after it.
     const percentText = (p: number) => ` ${String(Math.round(p)).padStart(3)}%`
     const ctxTokens = `  ${usage?.tokens != null ? formatTokens(usage.tokens) : '—'} из ${usage ? formatTokens(usage.window) : '—'}`
-    const ctxWarning = ctxPercent !== null && ctxPercent >= 80 ? ' ▲ пора /compact' : ''
+    const ctxWarning = ctxPercent === null ? '' : ctxWarningText(ctxPercent, ctxTok)
     const limitTexts = limits.map(limit => {
       const resetsIn = limit.resetsAt ? Date.parse(limit.resetsAt) - now : NaN
       const eta = forecastMs(limit.kind, samples[limit.kind])
@@ -654,8 +723,8 @@ export const register: Register = on => {
     const contextRow = (
       <Text key="ctx" wrap="truncate-end">
         {label('Контекст')}
-        {bar('ctx', ctxPercent, barWidth)}
-        <Text bold color={ctxPercent === null ? 'subtle' : levelColor(ctxPercent)}>
+        {bar('ctx', ctxPercent, barWidth, ctxTicks(usage?.window))}
+        <Text bold color={ctxPercent === null ? 'subtle' : ctxColor(ctxPercent, ctxTok)}>
           {ctxPercent === null ? '    —' : percentText(ctxPercent)}
         </Text>
         <Text dimColor>{ctxTokens}</Text>
