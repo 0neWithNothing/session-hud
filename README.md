@@ -16,7 +16,7 @@
 В терминальной сессии Claude Code:
 
 ```
-/plugin install session-hud --marketplace OWNER/REPO
+/plugin install session-hud --marketplace 0neWithNothing/session-hud
 ```
 
 Ответь `y` на вопрос о добавлении маркетплейса, затем выбери scope (user — для всех сессий).
