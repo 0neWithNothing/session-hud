@@ -390,7 +390,8 @@ export const register: Register = on => {
 
     const result = await next(e)
 
-    const input = (e as { input?: Record<string, unknown> }).input ?? {}
+    // The tool's arguments sit beside `tool` on the event itself (`e.file_path`).
+    const input = e as unknown as Record<string, unknown>
     const stats = editStats(tool, input)
     const isOk = !('deny' in result && result.deny) && !result.isError
     if (stats && isOk) {

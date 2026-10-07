@@ -46,3 +46,18 @@ test('/hud folds the HUD to one line', async $ => {
   expect(await ui.find({ text: /Контекст/ })).toBeUndefined()
   await ui.unmount()
 })
+
+test('an Edit adds its changed lines to the edits counter', async ($, on) => {
+  on('tool.call', () => ({ result: {} as never }))
+  await $.tool.call({
+    tool: 'Edit',
+    file_path: 'C:/tmp/a.txt',
+    old_string: 'one',
+    new_string: 'two\nthree',
+  } as Parameters<typeof $.tool.call>[0])
+  const ui = await $.ui.mount({ plugin: 'session-hud', surface: 'terminal', ...IDLE })
+  expect(await ui.find({ text: /\+2/ })).toBeDefined()
+  expect(await ui.find({ text: /−1/ })).toBeDefined()
+  expect(await ui.find({ text: /1 файл/ })).toBeDefined()
+  await ui.unmount()
+})

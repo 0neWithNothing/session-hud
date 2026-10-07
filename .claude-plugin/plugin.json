@@ -1,6 +1,6 @@
 {
   "name": "session-hud",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Live HUD under the prompt: context window, rate limits, model, effort, session time, cost, edits, agents, tools and skills",
   "author": { "name": "Daniel" },
   "types": "./types/index.d.ts"
