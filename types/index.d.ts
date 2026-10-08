@@ -39,6 +39,7 @@ declare module 'claude-code' {
       warned: string[]
       isCompact: boolean
       modeLabel: string | null
+      sprite: number
     }
   }
 }

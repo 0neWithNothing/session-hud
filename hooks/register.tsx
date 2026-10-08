@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderNode, SessionContextUsage, SessionCost, SessionRateLimit } from 'claude-code'
 
 import type { HudAgent, HudEdits, HudInfo, HudLimit, HudSample, HudUsage } from '../types'
+import { SPRITE_WIDTH, spriteCells } from './sprite'
 
 const EMPTY_INFO: HudInfo = {
   model: null,
@@ -27,6 +28,7 @@ const samplesAtom = atom({ plugin: 'session-hud', key: 'samples' } as const, {})
 const warnedAtom = atom({ plugin: 'session-hud', key: 'warned' } as const, [])
 const modeAtom = atom({ plugin: 'session-hud', key: 'modeLabel' } as const, null)
 const compactAtom = atom({ plugin: 'session-hud', key: 'isCompact' } as const, false)
+const spriteAtom = atom({ plugin: 'session-hud', key: 'sprite' } as const, 0)
 
 const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']
 
@@ -58,6 +60,8 @@ const ORANGE = 'claude'
 const SPINNER = ['◐', '◓', '◑', '◒']
 const LABEL_WIDTH = 13
 const SIDE_WIDTH = 38
+// The sprite's column, with its gap, and the least inner width that keeps it.
+const SPRITE_COLUMN = SPRITE_WIDTH + 2
 const TOP_TOOLS = 5
 const TOP_SKILLS = 4
 
@@ -316,6 +320,7 @@ export const register: Register = on => {
   let lastTick = 0
   let lastAgentPoll = 0
   let lastEffortPoll = 0
+  let spriteTick = 0
 
   on('session.start', async ($, e, next) => {
     const result = await next(e)
@@ -344,6 +349,14 @@ export const register: Register = on => {
         lastAgentPoll = now
         void refreshAgents($)
       }
+    })
+
+    // The sprite hops while anyone works and blinks now and then while idle.
+    $.clock.every(250, () => {
+      spriteTick += 1
+      const isBusy = isWorking || runningAgents > 0
+      const frame = isBusy ? Math.floor(spriteTick / 2) % 2 : spriteTick % 20 === 19 ? 2 : 0
+      void update($, spriteAtom, f => (f === frame ? f : frame))
     })
 
     return result
@@ -535,6 +548,7 @@ export const register: Register = on => {
     const skillCounts = await read($, skillCountsAtom)
     const samples = await read($, samplesAtom)
     const isCompact = await read($, compactAtom)
+    const spriteFrame = await read($, spriteAtom)
     const now = (await read($, nowAtom)) || Date.now()
 
     const hint = e.props.hint
@@ -551,7 +565,8 @@ export const register: Register = on => {
     // reaches back under the label, so it spans the whole footer.
     const labelWidth = labelCells(modeLabel ?? (await read($, modeAtom)) ?? DEFAULT_LABEL)
     const width = Math.max(40, (e.viewport?.columns ?? 80) - 4)
-    const inner = width - 4
+    const showSprite = !isCompact && width - 4 >= 100 + SPRITE_COLUMN
+    const inner = width - 4 - (showSprite ? SPRITE_COLUMN : 0)
     const isWide = inner >= 100
     const leftWidth = isWide ? inner - SIDE_WIDTH - 2 : inner
 
@@ -850,6 +865,29 @@ export const register: Register = on => {
       </Box>
     )
 
-    return frame(headerRow, body)
+    if (!showSprite) return frame(headerRow, body)
+
+    const sprite = (
+      <Box flexDirection="column" width={SPRITE_WIDTH} marginLeft={2} alignSelf="flex-end">
+        {spriteCells(spriteFrame).map((row, y) => (
+          <Text key={`sprite-${y}`}>
+            {row.map((cell, x) => (
+              <Text key={`px-${y}-${x}`} color={cell.color} backgroundColor={cell.backgroundColor}>
+                {cell.glyph}
+              </Text>
+            ))}
+          </Text>
+        ))}
+      </Box>
+    )
+    return frame(
+      <Box flexDirection="row">
+        <Box flexDirection="column" width={inner}>
+          {headerRow}
+          {body}
+        </Box>
+        {sprite}
+      </Box>,
+    )
   })
 }
