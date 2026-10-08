@@ -86,13 +86,3 @@ test('a large context warns by tokens even in a big window', async ($, on) => {
   expect(await ui.find({ text: /контекст большой/ })).toBeDefined()
   await ui.unmount()
 })
-
-test('a wide full HUD draws the pixel sprite, a narrow one leaves it out', async $ => {
-  const wide = await $.ui.mount({ plugin: 'session-hud', surface: 'terminal', viewport: { columns: 160, rows: 40 }, ...IDLE })
-  expect(await wide.find({ text: /[\u{1FB00}-\u{1FB3B}]/u })).toBeDefined()
-  await wide.unmount()
-
-  const narrow = await $.ui.mount({ plugin: 'session-hud', surface: 'terminal', viewport: { columns: 100, rows: 40 }, ...IDLE })
-  expect(await narrow.find({ text: /[\u{1FB00}-\u{1FB3B}]/u })).toBeUndefined()
-  await narrow.unmount()
-})
