@@ -269,6 +269,7 @@ const refreshBranch = async ($: EngineInterface) => {
 
 // Agents seen running at the last poll: background ones outlive the main turn.
 let runningAgents = 0
+const ENDED = new Set(['completed', 'failed', 'killed'])
 
 // The model the main loop last sent a request with, by id (`claude-opus-5-5`).
 let modelId: string | null = null
@@ -297,7 +298,9 @@ const refreshEffort = async ($: EngineInterface) => {
 const refreshAgents = async ($: EngineInterface) => {
   try {
     const running: HudAgent[] = (await $.agent.list())
-      .filter(agent => agent.status === 'running' || agent.status === 'pending')
+      // Alive until it ends: a background agent sits in `waiting` while it holds
+      // on its own calls, a teammate in `idle` between turns.
+      .filter(agent => !ENDED.has(agent.status))
       .map(agent => ({ id: agent.id, type: agent.type, description: agent.description }))
     runningAgents = running.length
     await update($, agentsAtom, list =>
@@ -319,6 +322,7 @@ export const register: Register = on => {
     await $.command.register({ name: 'hud', description: 'Toggle the session HUD between full and compact' })
     await refresh($).catch(() => undefined)
     void refreshBranch($)
+    void refreshAgents($)
 
     $.clock.every(1000, () => {
       const now = Date.now()
@@ -334,7 +338,9 @@ export const register: Register = on => {
         lastEffortPoll = now
         void refreshEffort($)
       }
-      if ((isWorking || runningAgents > 0) && now - lastAgentPoll >= 2000) {
+      // Idle, still poll now and then: an agent can start without an Agent call here.
+      const agentPollMs = isWorking || runningAgents > 0 ? 2000 : 10_000
+      if (now - lastAgentPoll >= agentPollMs) {
         lastAgentPoll = now
         void refreshAgents($)
       }
